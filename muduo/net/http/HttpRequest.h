@@ -18,6 +18,7 @@
 #include <map>
 #include <assert.h>
 #include <stdio.h>
+#include <iostream>
 
 namespace muduo
 {
@@ -126,6 +127,15 @@ class HttpRequest : public muduo::copyable
   const string& query() const
   { return query_; }
 
+///*
+  void setBody(const char* start, const char* end)
+  {
+    body_.assign(start, end);
+  }
+
+  const string& body() const
+  { return body_; }
+//*/
   void setReceiveTime(Timestamp t)
   { receiveTime_ = t; }
 
@@ -170,6 +180,7 @@ class HttpRequest : public muduo::copyable
     query_.swap(that.query_);
     receiveTime_.swap(that.receiveTime_);
     headers_.swap(that.headers_);
+    body_.swap(that.body_);
   }
 
  private:
@@ -177,6 +188,7 @@ class HttpRequest : public muduo::copyable
   Version version_;
   string path_;
   string query_;
+  string body_;
   Timestamp receiveTime_;
   std::map<string, string> headers_;
 };
