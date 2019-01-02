@@ -1,0 +1,3 @@
+# socks5
+
+这个程序的用处是接受http或者一般的sock连接，然后按照socks5协议将数据封装，proxy到一个socks5的服务器，再把socks5服务器接收到的请求返回客户端
