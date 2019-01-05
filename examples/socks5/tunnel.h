@@ -7,18 +7,31 @@
 #include <muduo/net/TcpClient.h>
 #include <muduo/net/TcpServer.h>
 
+using namespace muduo;
+using namespace muduo::net;
+
 class Tunnel : public std::enable_shared_from_this<Tunnel>,
                muduo::noncopyable
 {
  public:
+  enum kSocks5State 
+  {
+    kInitial,
+    kExpectMethod,
+    kExpectFormat,
+    kExpectBody,
+  };
+
   Tunnel(muduo::net::EventLoop* loop,
          const muduo::net::InetAddress& serverAddr,
          const muduo::net::TcpConnectionPtr& serverConn)
     : client_(loop, serverAddr, serverConn->name()),
-      serverConn_(serverConn)
+      serverConn_(serverConn),
+      state_(kInitial)
   {
     LOG_INFO << "Tunnel " << serverConn->peerAddress().toIpPort()
              << " <-> " << serverAddr.toIpPort();
+    format_ = Buffer(11);
   }
 
   ~Tunnel()
@@ -41,6 +54,9 @@ class Tunnel : public std::enable_shared_from_this<Tunnel>,
                   std::weak_ptr<Tunnel>(shared_from_this()), kServer, _1, _2),
         1024*1024);
   }
+
+void setFormat(const char* ch, int len)
+{ format_.append(ch, len); }
 
   void connect()
   {
@@ -71,7 +87,7 @@ class Tunnel : public std::enable_shared_from_this<Tunnel>,
     using std::placeholders::_1;
     using std::placeholders::_2;
 
-    LOG_DEBUG << (conn->connected() ? "UP" : "DOWN");
+    LOG_ERROR << (conn->connected() ? "UP" : "DOWN");
     if (conn->connected())
     {
       conn->setTcpNoDelay(true);
@@ -80,12 +96,10 @@ class Tunnel : public std::enable_shared_from_this<Tunnel>,
                     std::weak_ptr<Tunnel>(shared_from_this()), kClient, _1, _2),
           1024*1024);
       serverConn_->setContext(conn);
-      serverConn_->startRead();
       clientConn_ = conn;
-      if (serverConn_->inputBuffer()->readableBytes() > 0)
-      {
-        conn->send(serverConn_->inputBuffer());
-      }
+      char methods[] = "\x05\x01\x00";
+      clientConn_->send(methods, 3);
+      state_ = kExpectMethod;
     }
     else
     {
@@ -97,16 +111,33 @@ class Tunnel : public std::enable_shared_from_this<Tunnel>,
                        muduo::net::Buffer* buf,
                        muduo::Timestamp)
   {
-    LOG_DEBUG << conn->name() << " " << buf->readableBytes();
-    if (serverConn_)
+    LOG_ERROR << conn->name() << " ---------- " << state_
+      << " ----------" << buf->readableBytes();
+    if (state_ == kExpectMethod)
     {
-      serverConn_->send(buf);
+      clientConn_ = conn;
+      clientConn_->send(&format_);
+      state_ = kExpectFormat;
+      LOG_ERROR << "kExpectMethod";
     }
-    else
+    else if (state_ == kExpectFormat)
     {
-      buf->retrieveAll();
-      abort();
+      conn->send(serverConn_->inputBuffer());
+      state_ = kExpectBody;
     }
+    else if (state_ == kExpectBody)
+    {
+      if (serverConn_)
+      {
+        serverConn_->send(buf);
+      }
+      else
+      {
+        buf->retrieveAll();
+        abort();
+      }
+    }
+    buf->retrieveAll();
   }
 
   enum ServerClient
@@ -189,6 +220,8 @@ class Tunnel : public std::enable_shared_from_this<Tunnel>,
   muduo::net::TcpClient client_;
   muduo::net::TcpConnectionPtr serverConn_;
   muduo::net::TcpConnectionPtr clientConn_;
+  kSocks5State state_;
+  Buffer format_;
 };
 typedef std::shared_ptr<Tunnel> TunnelPtr;
 
